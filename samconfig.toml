@@ -1,0 +1,12 @@
+version = 0.1
+
+[default.global.parameters]
+stack_name = "vex-data"
+
+[default.deploy.parameters]
+region = "us-east-1"
+resolve_s3 = true
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = false
+disable_rollback = false
+parameter_overrides = "RobotEventsApiKey=\"REPLACE_ME\""

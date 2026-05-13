@@ -1,0 +1,125 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: VEX Data pipeline - FastAPI on Lambda with Athena/S3/Glue backing store.
+
+Parameters:
+  RobotEventsApiKey:
+    Type: String
+    NoEcho: true
+    Description: API key for the RobotEvents v2 API (injected as ROBOTEVENTS_API_KEY).
+  AthenaDatabase:
+    Type: String
+    Default: vex_data
+    Description: Glue database name backing the Athena tables.
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 90
+    MemorySize: 512
+    Environment:
+      Variables:
+        S3_BUCKET: !Ref VexDataBucket
+        ATHENA_DATABASE: !Ref AthenaDatabase
+        ATHENA_OUTPUT_LOCATION: !Sub s3://${VexDataBucket}/athena-results/
+        # AWS_REGION is reserved by Lambda and auto-injected at runtime — cannot be set here.
+        ROBOTEVENTS_API_KEY: !Ref RobotEventsApiKey
+
+Resources:
+  VexDataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: vex-data
+      VersioningConfiguration:
+        Status: Enabled
+
+  GlueDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: !Ref AthenaDatabase
+
+  AthenaWorkgroup:
+    Type: AWS::Athena::WorkGroup
+    Properties:
+      Name: vex-data-wg
+      State: ENABLED
+      WorkGroupConfiguration:
+        EnforceWorkGroupConfiguration: true
+        PublishCloudWatchMetricsEnabled: false
+        ResultConfiguration:
+          OutputLocation: !Sub s3://${VexDataBucket}/athena-results/
+
+  AppRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: VexDataAppInlinePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: S3VexDataBucket
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub arn:aws:s3:::${VexDataBucket}
+                  - !Sub arn:aws:s3:::${VexDataBucket}/*
+              - Sid: AthenaWorkgroup
+                Effect: Allow
+                Action:
+                  - athena:StartQueryExecution
+                  - athena:GetQueryExecution
+                  - athena:GetQueryResults
+                  - athena:StopQueryExecution
+                Resource:
+                  - !Sub arn:aws:athena:${AWS::Region}:${AWS::AccountId}:workgroup/${AthenaWorkgroup}
+              - Sid: GlueVexDataDatabase
+                Effect: Allow
+                Action:
+                  - glue:GetDatabase
+                  - glue:GetTable
+                  - glue:GetTables
+                  - glue:CreateTable
+                  - glue:UpdateTable
+                Resource:
+                  - !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:catalog
+                  - !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:database/${AthenaDatabase}
+                  - !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:table/${AthenaDatabase}/*
+
+  VexDataFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: VexDataFunction
+      Handler: app.main.handler
+      CodeUri: .
+      Role: !GetAtt AppRole.Arn
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref VexDataApi
+            Path: /{proxy+}
+            Method: ANY
+
+  VexDataApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: $default
+
+Outputs:
+  ApiUrl:
+    Description: Base URL for the HTTP API Gateway.
+    Value: !Sub https://${VexDataApi}.execute-api.${AWS::Region}.amazonaws.com
