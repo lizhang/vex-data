@@ -17,6 +17,7 @@ class Settings(BaseSettings):
 
     athena_database: str = "vex_data"
     athena_output_location: str = ""
+    athena_workgroup: str = "vex-data-wg"
 
     def model_post_init(self, __context) -> None:
         if not self.athena_output_location:

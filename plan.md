@@ -528,7 +528,7 @@ Generates realistic sample rows for all 7 curated tables, converts to Parquet wi
 
 **Seed parameters** (hardcoded or CLI args):
 - `season_id = 190`, `program_id = 1` (VRC)
-- 3 sample events, 10 teams, ~30 matches, skills + rankings per event
+- 10 sample events, 100 teams, ~10 matches per events, skills + rankings per event
 
 **Tables seeded and S3 paths written:**
 
