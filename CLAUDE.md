@@ -74,7 +74,7 @@ Routing, filter→WHERE mappings, SQL templates, security, and encoding conventi
 ## S3 Layout
 
 ```
-s3://vex-data/
+s3://vex-search-data-v1/
   raw/         {entity}/p_season_id={s}/p_program_id={p}/[p_event_id={e}/]{ts}.json
   curated/     {entity}/p_season_id={s}/p_program_id={p}/[p_event_id={e}/]{ts}.parquet
   athena-results/
@@ -97,7 +97,7 @@ sam deploy --guided    # first time — writes samconfig.toml
 sam deploy             # subsequent
 ```
 
-Resources created: S3 bucket `vex-data`, Athena workgroup `vex-data-wg`, Glue database `vex_data`, IAM role, Lambda function, HTTP API Gateway.
+Resources created: S3 bucket `vex-search-data-v1`, Athena workgroup `vex-data-wg`, Glue database `vex_data`, IAM role, Lambda function, HTTP API Gateway.
 
 The Lambda entry point is `handler = Mangum(app)` in `app/main.py`.
 
@@ -108,7 +108,7 @@ All config via environment variables (`.env` locally, SAM `Globals.Function.Envi
 | Variable | Default | Notes |
 |----------|---------|-------|
 | `ROBOTEVENTS_API_KEY` | — | required |
-| `S3_BUCKET` | — | `vex-data` |
+| `S3_BUCKET` | — | `vex-search-data-v1` |
 | `S3_RAW_PREFIX` | `raw` | |
 | `S3_CURATED_PREFIX` | `curated` | |
 | `AWS_REGION` | `us-east-1` | |

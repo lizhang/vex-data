@@ -42,11 +42,11 @@ Python FastAPI project that:
 4. Exposes Athena query endpoints with a domain-specific JSON query interface
 
 **S3 layout:**
-- Bucket: `vex-data`
-- Raw:     `s3://vex-data/raw/{entity}/p_season_id={s}/p_program_id={p}/{timestamp}.json`
-- Curated (season-scoped):  `s3://vex-data/curated/{entity}/p_season_id={s}/p_program_id={p}/{timestamp}.parquet`
-- Curated (event-scoped):   `s3://vex-data/curated/{entity}/p_season_id={s}/p_program_id={p}/p_event_id={e}/{timestamp}.parquet`
-- Athena: `s3://vex-data/athena-results/`
+- Bucket: `vex-search-data-v1`
+- Raw:     `s3://vex-search-data-v1/raw/{entity}/p_season_id={s}/p_program_id={p}/{timestamp}.json`
+- Curated (season-scoped):  `s3://vex-search-data-v1/curated/{entity}/p_season_id={s}/p_program_id={p}/{timestamp}.parquet`
+- Curated (event-scoped):   `s3://vex-search-data-v1/curated/{entity}/p_season_id={s}/p_program_id={p}/p_event_id={e}/{timestamp}.parquet`
+- Athena: `s3://vex-search-data-v1/athena-results/`
 
 ---
 
@@ -109,13 +109,13 @@ RobotEvents API  (https://www.robotevents.com/api/v2)
       ▼
 POST /ingest/{entity}   →  saves list[dict] as JSON
       ▼
-s3://vex-data/raw/{entity}/p_season_id={s}/p_program_id={p}/{timestamp}.json
+s3://vex-search-data-v1/raw/{entity}/p_season_id={s}/p_program_id={p}/{timestamp}.json
       ▼
 POST /curate/{entity}
   base tables:    reads raw JSON → clean/flatten → write per partition
   derived tables: joins/aggregates curated Parquets → write per (season, program)
       ▼
-s3://vex-data/curated/{entity}/p_season_id={s}/p_program_id={p}/[p_event_id={e}/]{timestamp}.parquet
+s3://vex-search-data-v1/curated/{entity}/p_season_id={s}/p_program_id={p}/[p_event_id={e}/]{timestamp}.parquet
       ▼
 POST /query/create-tables  →  CREATE EXTERNAL TABLE (DDL from curated/*.sql)
       ▼
@@ -152,13 +152,13 @@ Client methods in `app/services/robotevents.py`:
 ```
 ROBOTEVENTS_API_KEY=...
 
-S3_BUCKET=vex-data
+S3_BUCKET=vex-search-data-v1
 S3_RAW_PREFIX=raw
 S3_CURATED_PREFIX=curated
 
 AWS_REGION=us-east-1
 ATHENA_DATABASE=vex_data
-ATHENA_OUTPUT_LOCATION=s3://vex-data/athena-results/
+ATHENA_OUTPUT_LOCATION=s3://vex-search-data-v1/athena-results/
 
 AWS_ACCESS_KEY_ID=        # optional — omit to use IAM role
 AWS_SECRET_ACCESS_KEY=
@@ -521,6 +521,11 @@ Each cleaner groups records by partition key(s) and writes one Parquet file per 
 
 Generates realistic sample rows for all 7 curated tables, converts to Parquet with the correct pyarrow schema, and uploads to the expected S3 partition paths. Intended as a one-time setup step to enable query-layer development without the RobotEvents API.
 
+**Workflow** — sample data is built locally first, then uploaded to S3:
+1. **Generate locally** — script materializes rows in memory and writes Parquet files to a local staging directory (e.g. `./sample_data/{table}/...parquet`) using the pyarrow schemas matching `curated/*.sql`. This lets you inspect / re-run the generation without S3 round-trips.
+2. **Upload to S3** — script then uploads each local Parquet file to its corresponding Hive-partitioned path under `s3://vex-search-data-v1/curated/...` via `boto3` / `app.services.s3`.
+3. Local staging directory can be deleted after a successful upload, or kept for re-uploads.
+
 **Seed parameters** (hardcoded or CLI args):
 - `season_id = 190`, `program_id = 1` (VRC)
 - 3 sample events, 10 teams, ~30 matches, skills + rankings per event
@@ -552,10 +557,10 @@ Config persisted in `samconfig.toml`.
 
 | Resource | Type | Notes |
 |----------|------|-------|
-| `VexDataBucket` | `AWS::S3::Bucket` | bucket name `vex-data`; versioning enabled |
-| `AthenaWorkgroup` | `AWS::Athena::WorkGroup` | output to `s3://vex-data/athena-results/`; enforce workgroup config |
+| `VexDataBucket` | `AWS::S3::Bucket` | bucket name `vex-search-data-v1`; versioning enabled |
+| `AthenaWorkgroup` | `AWS::Athena::WorkGroup` | output to `s3://vex-search-data-v1/athena-results/`; enforce workgroup config |
 | `GlueDatabase` | `AWS::Glue::Database` | database name `vex_data` |
-| `AppRole` | `AWS::IAM::Role` | Lambda execution role; S3 read/write on `vex-data`; Athena + Glue full access |
+| `AppRole` | `AWS::IAM::Role` | Lambda execution role; S3 read/write on `vex-search-data-v1`; Athena + Glue full access |
 | `VexDataFunction` | `AWS::Serverless::Function` | FastAPI wrapped with Mangum; handler `app.main.handler`; runtime Python 3.12 |
 | `VexDataApi` | `AWS::Serverless::HttpApi` | routes all traffic to `VexDataFunction` |
 
@@ -589,7 +594,7 @@ Resources:
   VexDataBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: vex-data
+      BucketName: vex-search-data-v1
       VersioningConfiguration:
         Status: Enabled
 
@@ -664,7 +669,7 @@ Add `mangum>=0.17.0` to `requirements.txt`.
 ## Verification
 
 1. `pip install -r requirements.txt` + fill `.env`
-2. `python scripts/seed_sample_data.py` → verify 7 curated Parquet sets appear in `s3://vex-data/curated/`
+2. `python scripts/seed_sample_data.py` → verify 7 curated Parquet sets appear in `s3://vex-search-data-v1/curated/`
 3. `uvicorn app.main:app --reload`
 4. `POST /query/create-tables` → verify `vex_data` database + 7 tables in Athena console
 5. `POST /query/execute {"entity":"events","filter":{"and":[{"field":"season_id","op":"eq","value":190},{"field":"events.country","op":"eq","value":"United States"}]},"orderBy":{"field":"events.time","direction":"asc"},"selectTop":20}`

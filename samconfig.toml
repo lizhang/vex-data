@@ -2,11 +2,13 @@ version = 0.1
 
 [default.global.parameters]
 stack_name = "vex-data"
+region = "us-east-1"
 
 [default.deploy.parameters]
-region = "us-east-1"
 resolve_s3 = true
 capabilities = "CAPABILITY_IAM"
-confirm_changeset = false
-disable_rollback = false
-parameter_overrides = "RobotEventsApiKey=\"REPLACE_ME\""
+confirm_changeset = true
+disable_rollback = true
+parameter_overrides = "AthenaDatabase=\"vex_data\""
+s3_prefix = "vex-data"
+image_repositories = []

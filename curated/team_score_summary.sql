@@ -15,4 +15,4 @@ PARTITIONED BY (
   p_program_id int
 )
 STORED AS PARQUET
-LOCATION 's3://vex-data/curated/team_score_summary/';
+LOCATION 's3://vex-search-data-v1/curated/team_score_summary/';

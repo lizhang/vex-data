@@ -29,7 +29,7 @@ Resources:
   VexDataBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: vex-data
+      BucketName: vex-search-data-v1
       VersioningConfiguration:
         Status: Enabled
 
@@ -74,6 +74,7 @@ Resources:
                   - s3:GetObject
                   - s3:PutObject
                   - s3:ListBucket
+                  - s3:GetBucketLocation
                 Resource:
                   - !Sub arn:aws:s3:::${VexDataBucket}
                   - !Sub arn:aws:s3:::${VexDataBucket}/*

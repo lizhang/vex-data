@@ -36,4 +36,4 @@ PARTITIONED BY (
   p_event_id bigint
 )
 STORED AS PARQUET
-LOCATION 's3://vex-data/curated/matches/';
+LOCATION 's3://vex-search-data-v1/curated/matches/';

@@ -28,4 +28,4 @@ PARTITIONED BY (
   p_program_id int
 )
 STORED AS PARQUET
-LOCATION 's3://vex-data/curated/events/';
+LOCATION 's3://vex-search-data-v1/curated/events/';
