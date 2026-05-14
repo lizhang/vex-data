@@ -1,4 +1,4 @@
-CREATE EXTERNAL TABLE teams (
+CREATE EXTERNAL TABLE IF NOT EXISTS teams (
   team_id bigint,
   number string,
   team_name string,
@@ -20,4 +20,12 @@ PARTITIONED BY (
   p_program_id int
 )
 STORED AS PARQUET
-LOCATION 's3://vex-search-data-v1/curated/teams/';
+LOCATION 's3://vex-search-data-v1/curated/teams/'
+TBLPROPERTIES (
+  'projection.enabled' = 'true',
+  'projection.p_season_id.type' = 'integer',
+  'projection.p_season_id.range' = '180,210',
+  'projection.p_program_id.type' = 'integer',
+  'projection.p_program_id.range' = '1,100',
+  'storage.location.template' = 's3://vex-search-data-v1/curated/teams/p_season_id=${p_season_id}/p_program_id=${p_program_id}/'
+);

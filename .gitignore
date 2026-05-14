@@ -10,3 +10,5 @@ venv/
 
 # SAM build artifacts
 .aws-sam/
+
+sample_data/

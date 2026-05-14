@@ -1,4 +1,4 @@
-CREATE EXTERNAL TABLE rankings (
+CREATE EXTERNAL TABLE IF NOT EXISTS rankings (
   event_id bigint,
   event_sku string,
   division_id bigint,
@@ -25,4 +25,14 @@ PARTITIONED BY (
   p_event_id bigint
 )
 STORED AS PARQUET
-LOCATION 's3://vex-search-data-v1/curated/rankings/';
+LOCATION 's3://vex-search-data-v1/curated/rankings/'
+TBLPROPERTIES (
+  'projection.enabled' = 'true',
+  'projection.p_season_id.type' = 'integer',
+  'projection.p_season_id.range' = '180,210',
+  'projection.p_program_id.type' = 'integer',
+  'projection.p_program_id.range' = '1,100',
+  'projection.p_event_id.type' = 'integer',
+  'projection.p_event_id.range' = '1,99999999',
+  'storage.location.template' = 's3://vex-search-data-v1/curated/rankings/p_season_id=${p_season_id}/p_program_id=${p_program_id}/p_event_id=${p_event_id}/'
+);

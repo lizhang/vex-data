@@ -526,9 +526,11 @@ Generates realistic sample rows for all 7 curated tables, converts to Parquet wi
 2. **Upload to S3** — script then uploads each local Parquet file to its corresponding Hive-partitioned path under `s3://vex-search-data-v1/curated/...` via `boto3` / `app.services.s3`.
 3. Local staging directory can be deleted after a successful upload, or kept for re-uploads.
 
-**Seed parameters** (hardcoded or CLI args):
-- `season_id = 190`, `program_id = 1` (VRC)
-- 10 sample events, 100 teams, ~10 matches per events, skills + rankings per event
+**Seed parameters** (argparse flags with defaults):
+- `--season 190 --program 1` (VRC)
+- `--events 10 --teams 100 --matches-per-event 10`
+- `--seed 42` (deterministic)
+- `--staging-dir ./sample_data`, `--skip-upload`, `--clean`
 
 **Tables seeded and S3 paths written:**
 
@@ -541,8 +543,11 @@ Generates realistic sample rows for all 7 curated tables, converts to Parquet wi
 | `rankings` | `curated/rankings/p_season_id=190/p_program_id=1/p_event_id={e}/{ts}.parquet` |
 | `team_event_summary` | `curated/team_event_summary/p_season_id=190/p_program_id=1/{ts}.parquet` |
 | `team_skill_summary` | `curated/team_skill_summary/p_season_id=190/p_program_id=1/{ts}.parquet` |
+| `team_score_summary` | `curated/team_score_summary/p_season_id=190/p_program_id=1/{ts}.parquet` |
 
-**Schema fidelity**: column names, types, and nested ARRAY<STRUCT> shapes must exactly match `curated/*.sql` so Athena can read the files without a schema mismatch.
+**Schema fidelity**: pyarrow schemas in `scripts/sample_data_schemas.py` are the single source of truth — column names, types, and nested ARRAY<STRUCT> shapes match `curated/*.sql` so Athena can read the files without a schema mismatch.
+
+**Partition discovery**: the curated DDLs use partition projection (`TBLPROPERTIES projection.enabled=true`). Athena resolves partitions directly from S3 path templates at query time — no `MSCK REPAIR TABLE` step needed after seeding.
 
 Run: `python scripts/seed_sample_data.py`
 
@@ -669,15 +674,16 @@ Add `mangum>=0.17.0` to `requirements.txt`.
 ## Verification
 
 1. `pip install -r requirements.txt` + fill `.env`
-2. `python scripts/seed_sample_data.py` → verify 7 curated Parquet sets appear in `s3://vex-search-data-v1/curated/`
-3. `uvicorn app.main:app --reload`
-4. `POST /query/create-tables` → verify `vex_data` database + 7 tables in Athena console
-5. `POST /query/execute {"entity":"events","filter":{"and":[{"field":"season_id","op":"eq","value":190},{"field":"events.country","op":"eq","value":"United States"}]},"orderBy":{"field":"events.time","direction":"asc"},"selectTop":20}`
-6. `POST /query/execute {"entity":"matches","filter":{"and":[{"field":"season_id","op":"eq","value":190},{"field":"teams.number","op":"eq","value":"1234Z"}]},"orderBy":{"field":"matches.score","direction":"desc"}}` → team alliance resolved for score column
-7. `POST /query/execute {"entity":"team","filter":{"and":[{"field":"season_id","op":"eq","value":190}]},"orderBy":{"field":"rankings.rank","direction":"asc"},"selectTop":1}` → TEAM_EVENT strategy
-8. `POST /query/execute {"entity":"team","filter":{"and":[{"field":"season_id","op":"eq","value":190},{"field":"program_id","op":"eq","value":1}]},"orderBy":{"field":"teams.best_skill_score","direction":"desc"},"selectTop":25}` → TEAM_SKILL strategy
-9. `POST /query/execute {"entity":"team","filter":{"and":[{"field":"season_id","op":"eq","value":190},{"field":"events.name","op":"contains","value":"Regional Championship"}]},"orderBy":{"field":"rankings.rank","direction":"asc"},"selectTop":10}` → TEAM_EVENT strategy
-10. `POST /query/execute {"entity":"team","filter":{"and":[{"field":"season_id","op":"eq","value":190},{"field":"program_id","op":"eq","value":1}]},"orderBy":{"field":"teams.high_score","direction":"desc"},"selectTop":10}` → TEAM_SCORE strategy
+2. **One-time** (only if tables already exist from a prior deploy): drop all 8 curated tables in the Athena console so the new partition-projection DDLs apply — Athena does not allow altering projection on existing tables.
+3. `python scripts/seed_sample_data.py` → verify 8 curated Parquet sets appear in `s3://vex-search-data-v1/curated/`
+4. `uvicorn app.main:app --reload`
+5. `POST /query/create-tables` → verify `vex_data` database + 8 tables in Athena console
+6. `POST /query/execute {"entity":"events","filter":{"and":[{"field":"season_id","op":"eq","value":190},{"field":"events.country","op":"eq","value":"United States"}]},"orderBy":{"field":"events.time","direction":"asc"},"selectTop":20}`
+7. `POST /query/execute {"entity":"matches","filter":{"and":[{"field":"season_id","op":"eq","value":190},{"field":"teams.number","op":"eq","value":"1234Z"}]},"orderBy":{"field":"matches.score","direction":"desc"}}` → team alliance resolved for score column
+8. `POST /query/execute {"entity":"team","filter":{"and":[{"field":"season_id","op":"eq","value":190}]},"orderBy":{"field":"rankings.rank","direction":"asc"},"selectTop":1}` → TEAM_EVENT strategy
+9. `POST /query/execute {"entity":"team","filter":{"and":[{"field":"season_id","op":"eq","value":190},{"field":"program_id","op":"eq","value":1}]},"orderBy":{"field":"teams.best_skill_score","direction":"desc"},"selectTop":25}` → TEAM_SKILL strategy
+10. `POST /query/execute {"entity":"team","filter":{"and":[{"field":"season_id","op":"eq","value":190},{"field":"events.name","op":"contains","value":"Regional Championship"}]},"orderBy":{"field":"rankings.rank","direction":"asc"},"selectTop":10}` → TEAM_EVENT strategy
+11. `POST /query/execute {"entity":"team","filter":{"and":[{"field":"season_id","op":"eq","value":190},{"field":"program_id","op":"eq","value":1}]},"orderBy":{"field":"teams.high_score","direction":"desc"},"selectTop":10}` → TEAM_SCORE strategy
 
 **SAM deploy:**
 ```bash
