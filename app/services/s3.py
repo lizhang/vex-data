@@ -2,13 +2,18 @@
 
 import io
 import json
+import time
 from typing import Any
 
 import boto3
 import pyarrow as pa
 import pyarrow.parquet as pq
+import structlog
 
 from app.config import settings
+
+
+log = structlog.get_logger(__name__)
 
 
 def _client():
@@ -58,12 +63,31 @@ def curated_s3_location(entity: str) -> str:
 
 def upload_json(data: list | dict, key: str) -> None:
     body = json.dumps(data, default=str).encode("utf-8")
+    log.info("s3.upload_json.start", bucket=settings.s3_bucket, key=key, byte_count=len(body))
+    start = time.monotonic()
     _client().put_object(Bucket=settings.s3_bucket, Key=key, Body=body)
+    log.info(
+        "s3.upload_json.end",
+        bucket=settings.s3_bucket,
+        key=key,
+        byte_count=len(body),
+        duration_ms=round((time.monotonic() - start) * 1000, 2),
+    )
 
 
 def download_json(key: str) -> Any:
+    log.info("s3.download_json.start", bucket=settings.s3_bucket, key=key)
+    start = time.monotonic()
     obj = _client().get_object(Bucket=settings.s3_bucket, Key=key)
-    return json.loads(obj["Body"].read())
+    body = obj["Body"].read()
+    log.info(
+        "s3.download_json.end",
+        bucket=settings.s3_bucket,
+        key=key,
+        byte_count=len(body),
+        duration_ms=round((time.monotonic() - start) * 1000, 2),
+    )
+    return json.loads(body)
 
 
 def list_raw_keys(
@@ -82,7 +106,24 @@ def upload_parquet(table: pa.Table, key: str) -> None:
     buf = io.BytesIO()
     pq.write_table(table, buf, compression="snappy")
     buf.seek(0)
-    _client().put_object(Bucket=settings.s3_bucket, Key=key, Body=buf.getvalue())
+    body = buf.getvalue()
+    log.info(
+        "s3.upload_parquet.start",
+        bucket=settings.s3_bucket,
+        key=key,
+        byte_count=len(body),
+        row_count=table.num_rows,
+    )
+    start = time.monotonic()
+    _client().put_object(Bucket=settings.s3_bucket, Key=key, Body=body)
+    log.info(
+        "s3.upload_parquet.end",
+        bucket=settings.s3_bucket,
+        key=key,
+        byte_count=len(body),
+        row_count=table.num_rows,
+        duration_ms=round((time.monotonic() - start) * 1000, 2),
+    )
 
 
 def list_curated_keys(
@@ -118,12 +159,21 @@ def _curated_or_raw_prefix(
 
 
 def _list_keys(prefix: str) -> list[str]:
+    log.info("s3.list_keys.start", bucket=settings.s3_bucket, prefix=prefix)
+    start = time.monotonic()
     s3 = _client()
     paginator = s3.get_paginator("list_objects_v2")
     keys: list[str] = []
     for page in paginator.paginate(Bucket=settings.s3_bucket, Prefix=prefix):
         for obj in page.get("Contents", []):
             keys.append(obj["Key"])
+    log.info(
+        "s3.list_keys.end",
+        bucket=settings.s3_bucket,
+        prefix=prefix,
+        object_count=len(keys),
+        duration_ms=round((time.monotonic() - start) * 1000, 2),
+    )
     return keys
 
 
@@ -131,6 +181,8 @@ def delete_keys(keys: list[str]) -> None:
     """Batch-delete S3 objects. Used by `--clean` in scripts."""
     if not keys:
         return
+    log.info("s3.delete_keys.start", bucket=settings.s3_bucket, object_count=len(keys))
+    start = time.monotonic()
     s3 = _client()
     for chunk_start in range(0, len(keys), 1000):
         chunk = keys[chunk_start:chunk_start + 1000]
@@ -138,3 +190,9 @@ def delete_keys(keys: list[str]) -> None:
             Bucket=settings.s3_bucket,
             Delete={"Objects": [{"Key": k} for k in chunk]},
         )
+    log.info(
+        "s3.delete_keys.end",
+        bucket=settings.s3_bucket,
+        object_count=len(keys),
+        duration_ms=round((time.monotonic() - start) * 1000, 2),
+    )

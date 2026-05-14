@@ -5,6 +5,7 @@ build_query(SearchQuery) -> (sql, params)
 All field-specific knowledge lives in config.py. This module never branches on
 specific field names — it consults FIELDS, ORDERS, and STRATEGIES.
 """
+import structlog
 from fastapi import HTTPException
 
 from app.models.schemas import SearchQuery
@@ -17,6 +18,9 @@ from .config import (
     STRATEGIES,
     Strategy,
 )
+
+
+log = structlog.get_logger(__name__)
 
 
 # ── Op-to-SQL emitter (generic, for fields without a custom handler) ──────
@@ -163,6 +167,14 @@ def _validate(q: SearchQuery, strategy: Strategy) -> None:
 # ── Entry point ───────────────────────────────────────────────────────────
 
 def build_query(q: SearchQuery, db: str = "vex_data") -> tuple[str, list]:
+    log.info(
+        "query_builder.build.start",
+        entity=q.entity,
+        filter=q.filter.model_dump() if q.filter else None,
+        order_by=q.orderBy.model_dump() if q.orderBy else None,
+        select_top=q.selectTop,
+    )
+
     strategy = select_strategy(q)
     conditions, is_or = _extract_conditions(q)
     _validate(q, strategy)
@@ -201,4 +213,11 @@ def build_query(q: SearchQuery, db: str = "vex_data") -> tuple[str, list]:
         f"{join_sql} {where_sql} {order_clause} LIMIT {limit}"
     )
     sql = " ".join(sql.split())
-    return sql, where_params + order_params
+    final_params = where_params + order_params
+    log.info(
+        "query_builder.build.end",
+        strategy=strategy.name,
+        sql=sql,
+        params=final_params,
+    )
+    return sql, final_params

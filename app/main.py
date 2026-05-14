@@ -5,10 +5,16 @@ from fastapi.responses import JSONResponse
 from mangum import Mangum
 
 from app.api.routes.query import router as query_router
+from app.logging_config import configure_logging
+from app.middleware.request_logging import RequestLoggingMiddleware
 from app.services.athena import AthenaQueryError, AthenaTimeoutError
 
 
+configure_logging()
+
 app = FastAPI(title="VEX Data API", version="1.0")
+
+app.add_middleware(RequestLoggingMiddleware)
 
 app.include_router(query_router, prefix="/query")
 

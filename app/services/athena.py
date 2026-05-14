@@ -6,9 +6,12 @@ import time
 from pathlib import Path
 
 import boto3
+import structlog
 
 from app.config import settings
 
+
+log = structlog.get_logger(__name__)
 
 TERMINAL_STATES = {"SUCCEEDED", "FAILED", "CANCELLED"}
 POLL_INTERVAL_SECONDS = 2
@@ -61,25 +64,69 @@ def execute_query(
     if string_params:
         start_kwargs["ExecutionParameters"] = string_params
 
+    log.info(
+        "athena.start_query_execution.start",
+        sql_preview=sql[:200],
+        param_count=len(string_params),
+    )
+    submit_start = time.monotonic()
     execution_id = client.start_query_execution(**start_kwargs)["QueryExecutionId"]
+    log.info(
+        "athena.start_query_execution.end",
+        execution_id=execution_id,
+        duration_ms=round((time.monotonic() - submit_start) * 1000, 2),
+    )
 
-    deadline = time.monotonic() + timeout
+    poll_start = time.monotonic()
+    poll_count = 0
+    deadline = poll_start + timeout
     while True:
+        poll_count += 1
         status = client.get_query_execution(QueryExecutionId=execution_id)["QueryExecution"]["Status"]
         state = status["State"]
         if state in TERMINAL_STATES:
             break
         if time.monotonic() >= deadline:
+            log.warning(
+                "athena.poll.timeout",
+                execution_id=execution_id,
+                poll_count=poll_count,
+                duration_ms=round((time.monotonic() - poll_start) * 1000, 2),
+            )
             raise AthenaTimeoutError(execution_id, timeout)
         time.sleep(POLL_INTERVAL_SECONDS)
 
+    log.info(
+        "athena.poll.end",
+        execution_id=execution_id,
+        state=state,
+        poll_count=poll_count,
+        duration_ms=round((time.monotonic() - poll_start) * 1000, 2),
+    )
+
     if state != "SUCCEEDED":
+        log.error(
+            "athena.query.failed",
+            execution_id=execution_id,
+            state=state,
+            state_reason=status.get("StateChangeReason", ""),
+        )
         raise AthenaQueryError(execution_id, state, status.get("StateChangeReason", ""))
 
     if not fetch_results:
         return [], []
 
-    return _fetch_all_results(client, execution_id)
+    log.info("athena.fetch_results.start", execution_id=execution_id)
+    fetch_start = time.monotonic()
+    rows, columns = _fetch_all_results(client, execution_id)
+    log.info(
+        "athena.fetch_results.end",
+        execution_id=execution_id,
+        row_count=len(rows),
+        column_count=len(columns),
+        duration_ms=round((time.monotonic() - fetch_start) * 1000, 2),
+    )
+    return rows, columns
 
 
 def _fetch_all_results(client, execution_id: str) -> tuple[list[dict[str, str | None]], list[str]]:
@@ -116,12 +163,20 @@ def create_tables(
     for sql_file in sql_files:
         ddl = sql_file.read_text(encoding="utf-8")
         scoped_ddl = _scope_ddl_to_database(ddl, db)
+        log.info("athena.create_table.start", table=sql_file.stem, database=db)
+        start = time.monotonic()
         execute_query(
             sql=scoped_ddl,
             params=[],
             output_location=output_location,
             workgroup=workgroup,
             fetch_results=False,
+        )
+        log.info(
+            "athena.create_table.end",
+            table=sql_file.stem,
+            database=db,
+            duration_ms=round((time.monotonic() - start) * 1000, 2),
         )
         tables.append(sql_file.stem)
 
